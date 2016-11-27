@@ -26,6 +26,7 @@ import decimal
 
 import sys
 from functools import wraps
+
 import testutils
 from testutils import unittest, ConnectingTestCase, decorate_all_tests
 
@@ -333,6 +334,37 @@ class TypesBasicTests(ConnectingTestCase):
         self.assertEqual(a, [1, 2, 3])
         a = self.execute("select array['a', 'b', '''']::text[]")
         self.assertEqual(a, ['a', 'b', "'"])
+
+    def testBoxArray(self):
+        import re
+
+        def caster(s, cur):
+            if s is None:
+                return None
+
+            m = re.match(r"\(([^)]+),([^)]+)\),\(([^)]+),([^)]+)\)", s)
+            if m:
+                return (
+                    (float(m.group(1)), float(m.group(2))),
+                    (float(m.group(3)), float(m.group(4))),
+                )
+            else:
+                raise psycopg2._psycopg.InterfaceError(
+                    "bad box representation: %r" % s
+                )
+
+        base = psycopg2.extensions.new_type((603,), "BOX", caster)
+        array = psycopg2.extensions.new_array_type((1020,), "BOXARRAY", base)
+        psycopg2.extensions.register_type(base, self.conn)
+        psycopg2.extensions.register_type(array, self.conn)
+
+        a = self.execute("SELECT box '((0, 1), (2, 3))'")
+        self.assertEqual(a, ((2.0, 3.0), (0.0, 1.0)))
+        a = self.execute(
+            "SELECT ARRAY[box '((0, 1), (2, 3))', box '((4,5), (6,7))']"
+        )
+        self.assertEqual(a, [((2.0, 3.0), (0.0, 1.0)),
+                             ((6.0, 7.0), (4.0, 5.0))])
 
     @testutils.skip_before_postgres(8, 2)
     def testGenericArrayNull(self):
